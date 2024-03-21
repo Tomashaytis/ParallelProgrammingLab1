@@ -4,6 +4,8 @@
 #include <string>
 #include <chrono>
 #include "Windows.h"
+#include "omp.h"
+#include "time.h"
 #define DIRECTORY "D:\\Projects\\Visual Studio\\source\\repos\\3 курс\\ParallelProgramming-Lab1\\matrices\\"
 #define MATRIX_COUNT 100
 
@@ -103,10 +105,13 @@ public:
             throw std::invalid_argument("Error! Index out of matrix bounds.");
         return _data[i][j];
     }
-    SquareMatrix& dot(const SquareMatrix& rhs)
+    double dot(const SquareMatrix& rhs)
     {
         if (rhs._size != _size)
             throw std::invalid_argument("Error! Matrix size was not the same.");
+        std::chrono::steady_clock::time_point begin, end;
+        std::chrono::duration<double> duration;
+        begin = std::chrono::high_resolution_clock::now();
         SquareMatrix result = SquareMatrix(_size);
         for (size_t i = 0; i < _size; i++)
         {
@@ -118,8 +123,35 @@ public:
                 }
             }
         }
+        end = std::chrono::high_resolution_clock::now();
+        duration = end - begin;
         *this = result;
-        return *this;
+        return duration.count();
+    }
+    double openmp_dot(const SquareMatrix& rhs)
+    {
+        if (rhs._size != _size)
+            throw std::invalid_argument("Error! Matrix size was not the same.");
+        SquareMatrix result = SquareMatrix(_size);
+        auto a = _data;
+        auto b = rhs._data;
+        auto c = result._data;
+        double begin = omp_get_wtime();
+        int i, j, k;
+        #pragma omp parallel for collapse(2) shared(a, b, c) private(i, j, k)
+        for (i = 0; i < _size; i++)
+        {
+            for (j = 0; j < _size; j++)
+            {
+                for (k = 0; k < _size; k++)
+                {
+                    c[i][k] += a[i][j] * b[j][k];
+                }
+            }
+        }
+        double end = omp_get_wtime();
+        *this = result;
+        return end - begin;
     }
     void save(std::string filename)
     {
@@ -162,10 +194,10 @@ int main()
     double stats[MATRIX_COUNT];
     std::string first_folder = std::string(DIRECTORY) + "first\\";
     std::string second_folder = std::string(DIRECTORY) + "second\\";
-    std::string result_folder = std::string(DIRECTORY) + "result\\";
-    std::string statistics_folder = std::string(DIRECTORY) + "statistics\\";
-    std::chrono::steady_clock::time_point begin, end;
-    std::chrono::duration<double> duration;
+    std::string result1_folder = std::string(DIRECTORY) + "result1\\";
+    std::string statistics1_folder = std::string(DIRECTORY) + "statistics1\\";
+    std::string result2_folder = std::string(DIRECTORY) + "result2\\";
+    std::string statistics2_folder = std::string(DIRECTORY) + "statistics2\\";
     std::string user_input;
     while (true)
     {
@@ -202,6 +234,7 @@ int main()
         }
         else if (user_input == "--calculate" || user_input == "-c")
         {
+            std::cout << "Series calculating starts\n";
             for (size_t k = 1; k < 11; k++)
             {
                 double time = 0;
@@ -211,16 +244,44 @@ int main()
                 {
                     matrix1.load(first_folder + size + std::to_string(i) + ".txt");
                     matrix2.load(second_folder + size + std::to_string(i) + ".txt");
-                    begin = std::chrono::high_resolution_clock::now();
-                    matrix1.dot(matrix2);
-                    end = std::chrono::high_resolution_clock::now();
-                    duration = end - begin;
-                    stats[i] = duration.count();
-                    time += duration.count();
-                    matrix1.save(result_folder + size + std::to_string(i) + ".txt");
+                    double wtime = matrix1.dot(matrix2);
+                    stats[i] = wtime;
+                    time += wtime;
+                    matrix1.save(result1_folder + size + std::to_string(i) + ".txt");
                 }
                 std::ofstream out;
-                out.open(statistics_folder + std::to_string(100 * k) + ".txt");
+                out.open(statistics1_folder + std::to_string(100 * k) + ".txt");
+                if (out.is_open())
+                {
+                    for (size_t i = 0; i < MATRIX_COUNT; i++)
+                    {
+                        out << stats[i] << '\n';
+                    }
+                }
+                out.close();
+                std::cout << "Matrices " + std::to_string(100 * k) + "x" + std::to_string(100 * k) + " - products calculated (" + std::to_string(time / MATRIX_COUNT) + " s)." << std::endl;
+            }
+        }
+        else if (user_input == "--openmp" || user_input == "-o")
+        {
+            std::cout << "OpenMP calculating starts\n";
+            std::cout << "Available threads: " << omp_get_max_threads() << std::endl;
+            for (size_t k = 1; k < 11; k++)
+            {
+                double time = 0;
+                std::string size = std::to_string(100 * k) + "\\";
+                SquareMatrix matrix1(100 * k), matrix2(100 * k);
+                for (size_t i = 0; i < MATRIX_COUNT; i++)
+                {
+                    matrix1.load(first_folder + size + std::to_string(i) + ".txt");
+                    matrix2.load(second_folder + size + std::to_string(i) + ".txt");
+                    double wtime = matrix1.openmp_dot(matrix2);
+                    stats[i] = wtime;
+                    time += wtime;
+                    matrix1.save(result2_folder + size + std::to_string(i) + ".txt");
+                }
+                std::ofstream out;
+                out.open(statistics2_folder + std::to_string(100 * k) + ".txt");
                 if (out.is_open())
                 {
                     for (size_t i = 0; i < MATRIX_COUNT; i++)
@@ -239,6 +300,7 @@ int main()
             std::cout << "[--exit] or [-e] - exit the programm." << std::endl;
             std::cout << "[--generate] or [-g] - generate matrices." << std::endl;
             std::cout << "[--calculate] or [-c] - calculate matrix progucts." << std::endl;
+            std::cout << "[--openmp] or [-o] - calculate matrix progucts by OpenMP techology." << std::endl;
             std::cout << "[--help] or [-h] - help with commands." << std::endl;
             std::cout << std::endl;
         }
